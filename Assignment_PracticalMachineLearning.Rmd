@@ -1,0 +1,128 @@
+---
+title: "Assignment Practical Machine Learning"
+author: "Long Nguyen Hoang"
+date: "26/07/2018"
+output: pdf_document
+---
+### Executive summary
+In this assignment I look at the Weight Lifting Exercises Dataset (http://groupware.les.inf.puc-rio.br/har) of Velloso et al. (2013). I will use this data to train a model to predict the exercise performance. First, the dataset is explored and cleaned. The dataset is then splitted. One part is used to train a model using random forest method. The smaller part is used to test and estimate the out of sample error. The constructed model is quite good with expected out of error sample only about 4%.
+
+
+### Exploratory analyse and cleaning data
+First, the training data is loaded and explored.  
+```{r readData}
+pmlTrain <- read.csv("pml-training.csv")
+dim(pmlTrain)
+```
+
+There are 19622 records of 160 variables of the data. The variables include:  
+- X = index  
+- Username = names of 6 males participants  
+- raw_timestamp (part 1 and part 2) and cvtd_timestamp  
+- new_window and num_window  
+```{r firt7Columns}
+head(pmlTrain[ , c(1:7)], 4)
+```
+
+- 38 measurements x 4 sensors on belt, arm, dumbbell, forearm (glove). The measurements are:
+    + 3 records at 3 Euler angles (roll, pitch, yaw)
+    + 2 records of total and variance of acceleration
+    + 24 records of 8 features (average, standard deviation, variance, kurtosis, skewness, max, min, amplitude) x 3 Euler angles (roll, pitch, yaw)
+    + 9 records of 3 directions (x, y, z) x 3 raw readings of acceleration, gyroscope and magnetometer.  
+Example of variables from arm sensors:  
+```{r exampleMeasurements}
+grep("_arm", names(pmlTrain), value=T)
+```
+
+- classe = how well they did the exercise (A = exactly according to the specification, B = throwing the elbows to the front, C = lifting the dumbbell only halfway, D = lowering the dumbbell only halfway, E = throwing the hips to the front).  
+
+The classe will be predicted by the measurement data only. First, variables having little variance are identified for removal since they likely are not good predictors:  
+```{r showNZV}
+library(caret)
+pmlTrain <- pmlTrain[ , -c(1:7)]
+nzv <- nearZeroVar(pmlTrain[ , -153])
+names(pmlTrain[ , nzv])
+```
+
+```{r removeNZV}
+pmlTrain <- pmlTrain[ , -nzv]
+```
+
+59 near-zero-variance variables have been removed. In the 94 variables left, there are many variables containing mostly NA values (~19216 records).  
+```{r showNA}
+naVar <- apply(pmlTrain, MARGIN=2, FUN=function(x) sum(is.na(x)))
+naVar[naVar > 0]
+```
+
+These variables are also need to be removed  
+```{r cleanNA}
+pmlTrain <- pmlTrain[ , -which(naVar > 0)]
+dim(pmlTrain)
+```
+
+The tidy data now have 19622 records of 53 variables.  
+
+### Building model
+Random forest will be used to predict the classe of performance because it has high accuracy and it is also my favourite. Cross validaton will be performed by bootstrapping with 10 times resampling. However, bootrap is random sampling with replacement so it tend to underestimate the out of sample error. Therefore, the train data is splited into 2 parts, one for training and one is kept for estimating the out of sample error.  
+```{r dataslice}
+set.seed=50
+inTrain <- createDataPartition(y=pmlTrain$classe, p=0.6, list=F)
+training <- pmlTrain[inTrain, ]
+testing <- pmlTrain[-inTrain, ]
+```
+
+The data is first preprocessed with Principle Component Analysis. This helps to reduce the number of predictors by removing unecessary highly correlated predictors, and therefore reduce the noise and complexity.  
+```{r preprocess}
+preProc <- preProcess(training[ ,-53], method="pca", thresh=0.90)
+trainPC <- predict(preProc, newdata=training[ ,-53])
+trainPC$classe <- training$classe
+dim(trainPC)
+```
+
+With a 90% cutoff for the cumulative percent of variance to be retained, there are only 18 predictors and classe in the preprocessed data.  
+```{r plotPCA, echo=F}
+g <- ggplot(trainPC, aes(PC1, PC2, color=classe))
+g + geom_point(alpha=0.8) + ggtitle("Figure 1: Seperation of data by PCA")
+```
+
+The figure 1 shows seperation between classe in 3 data cloud on the left. This illustrates how effective the preprocessing with PCA is. Now the model is trained with the new training dataset.  
+```{r model, cache=T}
+set.seed=100
+modFitPC <- train(classe ~., method="rf", data=trainPC, 
+                trControl=trainControl(method="boot", number=10))
+modFitPC
+```
+
+The accuracy was in range of 92% to 95%. The out of sample error is estimated with the testing data.  
+```{r estimateouterror}
+testPC <- predict(preProc, newdata=testing[ ,-53])
+testPC$classe <- testing$classe
+predPC <- predict(modFitPC, newdata=testPC)
+confusionMatrix(predPC,as.factor(testPC$classe))
+```
+
+The out of sample error is expected to be 1 - Accuracy = 0.044 or 4%. This model is therefore quite good.  
+```{r confusionmatrixPlot, echo=F}
+confusion_matrix <- as.data.frame(table(predPC, testPC$classe))
+names(confusion_matrix) <- c("Prediction", "Reference", "Frequency")
+ggplot(data=confusion_matrix, mapping = aes(x=Prediction, y=Reference)) +
+    geom_tile(aes(fill = Frequency)) +
+    geom_text(aes(label = sprintf("%1.0f", Frequency)), vjust = 1) +
+    scale_fill_gradient(low = "lightyellow", high = "red") +
+    ggtitle("Figure 2: Summary confusion matrix")
+```
+
+The testing data is now loaded to predict the classe of performance.  
+```{r prediction}
+pmlTest <- read.csv("pml-testing.csv")
+predictPC <- predict(preProc, newdata=pmlTest)
+pred <- predict(modFitPC, newdata=predictPC)
+problem <- data.frame(problem_id=predictPC$problem_id, predicton=pred)
+problem
+```
+
+### Conclusion
+After cleaning and preprocessing the Weight Lifting Exercises Dataset, I fit a random forest model with 18 predictors to predict the exercise performance. The constructed model is quite good with expected out of error sample only about 4%.
+
+### Reference
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.

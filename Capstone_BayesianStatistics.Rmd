@@ -1,0 +1,362 @@
+---
+title: "Data Analysis Project - Long Nguyen"
+output: pdf_document
+---
+\fontsize{9}{12}
+\selectfont
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(font = FALSE)
+```
+
+#### Abstract
+
+Plants utilize sunlight to synthesize nutrients from carbon dioxide 
+and water via a process called photosynthesis. Weather conditions such as cold 
+temperature could potentially affect the photosynthesis of plants. In this assignment, 
+Bayesian hierarchical model was employed for studying the effect of cold 
+on the amount carbon uptake by Echinochloa crus-galli - a tropical  wild grass.
+The results show that chilled condition reduces the CO~2~ uptake
+from 5 to 10 µmol/m^2^.sec and therefore potentially inhibits the photosynthesis of the grass.
+
+
+
+#### 1. Introduction  
+
+To survive plants need to ulilize sunlight to synthesize nutrients from carbon dioxide 
+and water. This process is called photosynthesis and it could be affected by weather conditions such as cold 
+temperature. This assignment investigated the effects of cold on photosynthesis of Echinochloa crus-galli - a tropical 
+wild grass. Particularly, the amount CO~2~ uptake by two types of Echinochloa 
+crus-galli under chilled and nonchilled conditions was modelled using Bayesian 
+herarchical models.  
+
+#### 2. Data  
+
+```{r library, include=FALSE}
+library("rjags")
+library("ggplot2")
+```
+The public CO2 dataset in R  was used to study the problem. 
+The dataset has 84 observations of five variables (Plant, Type, Treatment, conc and uptake). 
+This was a results of an experiment on the cold tolerance of the grass species Echinochloa crus-galli (Potvin et. al. 1990).
+The experiment monitored the CO~2~ uptake rate (µmol/m^2^.sec) of two Echinochloa crus-galli types (Quebec and Mississippi) 
+at seven levels of ambient CO~2~ concentrations (mL/L). 
+Each type consists of three individuals, of which each individual was treated and monitored at two weather conditions (nonchilled and chilled). 
+The dataset was already clean and tidy. It contains no missing value so that it is readily to be exploited.  
+
+```{r data}
+data("CO2")
+attach(CO2)
+CO2$conc <- as.factor(CO2$conc)
+```
+```{r summary, echo=TRUE}
+summary(CO2)
+```
+```{r data2}
+CO2$conc <- as.numeric(as.character(CO2$conc))
+```
+
+Figure 1 (left) shows that chilled treatment seems to reduce the carbon uptake rate from the same
+grass type, especially for Mississippi grasses (green). It also shows that Quebec grasses (red) have
+higher uptake rate than Mississippi grasses. Thus, type of grass should be included in the model beside treatment.
+Figure 1 (right) illustrates the similar trends along the gradient of ambient CO~2~ concentration.
+Moreover, as ambient concentration increase, the uptake concentration increases quickly in the begining and slowdown toward higher
+ambient concentration. It seems like the grasses can only uptake CO~2~ until a certain saturation point.
+Therefore, the uptake concentration is likely to correlate with log of ambient cocentration as shown in figure 1 (right).  
+
+```{r exploratory1, fig.height=2.5, fig.width=3}
+ggplot(CO2, aes(Treatment, uptake, fill=Type)) + geom_boxplot() + theme_minimal() +
+  labs(y = bquote("CO"[2]*" Uptake (µmol / m"^2*".sec]"), x="Treatment") +
+    theme(axis.title = element_text(size=8), axis.text.x = element_text(size=7), axis.text.y = element_text(size=7), 
+          legend.text = element_text(size=7), legend.title = element_text(size=8))
+```
+```{r exploratory2, fig.height=2.5, fig.width=4}
+ggplot(CO2, aes(conc, uptake, col=interaction(Type,Treatment), shape=Treatment)) + geom_point() + theme_minimal() +
+  scale_shape_manual(values=c(4, 2)) + stat_smooth(method="lm", formula = y ~ log(x), se=FALSE, size=0.4) +
+  theme(axis.text.x = element_text(size=6), axis.text.y = element_text(size=6), axis.title = element_text(size=8),
+        legend.text = element_text(size=6), legend.title = element_text(size=7)) +
+  labs(col="Type") +
+  labs(y = element_blank(), x=bquote("Ambient Concentration (ml CO"[2]*" / L)"))
+```
+
+**Figure 1:** Exploratory plot. Left, boxplot of CO~2~ uptake ~ Treament + Type (color). 
+Right, CO~2~ uptake ~ ambient concentration + Treatmen (shape) + Type (color). The least squared fits
+of uptake ~ log of ambient concentration for each case are also shown.  
+
+#### 3. Model  
+With the reasons stated above, uptake CO~2~ concentration will be predicted with log of 
+ambient concentration, treatment (represented by a dummy variable is_chilled = {0,1} 
+indicating the condition of nonchilled or chilled) and type of grass. 
+Three Bayesian hierarchical models with increasing complexity and terms were employed.
+The individual grasses are conditionally independent, however, there are likely correlation among grasses having the same origin.
+Thus, hierarchical models are appropriate here to capture the correlation accross types of grass.
+In the models, grasses of the same type will share common parameters, which themselves share a common distribution accross the types.
+The three models are described below:  
+
+**Model 1 (Type dependent, each type get it own intercept):**
+$$
+\begin{aligned} 
+uptake_i ~| ~Type_i, \underset{\sim}{~conc_i}, ~\underset{\sim}{\alpha}, ~\underset{\sim}{\beta}, ~\sigma^2 \overset{ind}{\sim} N(\alpha_{Type_i} + \beta_1*log(conc_i) + \beta_2*is\_chilled_i, ~\sigma^2)\\
+  Type_i ~\in \{Quebec, Mississippi\}; ~i = 1,...,n\\
+  \alpha_{Type} ~| ~\mu, ~\tau^2 \overset{iid}{\sim} N(~\mu, ~\tau^2)
+\end{aligned}
+$$
+
+**Model 2 (similar to model 1 plus an interaction term between log of concentration and chilled):**
+$$
+\begin{aligned} 
+uptake_i ~| ~Type_i, \underset{\sim}{~conc_i}, ~\underset{\sim}{\alpha}, ~\underset{\sim}{\beta}, ~\sigma^2 \overset{ind}{\sim} N(\alpha_{Type_i} + \beta_1*log(conc_i) + \beta_2*is\_chilled_i \\ + \beta_3*is\_chilled_i*log(conc_i),~\sigma^2)\\\\
+  Type_i ~\in \{Quebec, Mississippi\}; ~i = 1,...,n\\
+  \alpha_{Type} ~| ~\mu, ~\tau^2 \overset{iid}{\sim} N(~\mu, ~\tau^2)
+\end{aligned}
+$$
+
+**Model 3 (similar to model 2 but each type get it own intercept and slope):**
+$$
+\begin{aligned} 
+uptake_i ~| ~Type_i, \underset{\sim}{~conc_i}, ~\underset{\sim}{\alpha}, ~\underset{\sim}{\beta}, ~\sigma^2 \overset{ind}{\sim} N(\alpha_{Type_i} + \theta_{Type_i}*log(conc_i) + \beta_1*is\_chilled_i \\+ \beta_2*is\_chilled_i*log(conc_i),~\sigma^2)\\\\
+  Type_i ~\in \{Quebec, Mississippi\}; ~i = 1,...,n\\
+  \alpha_{Type} ~| ~\mu_{\alpha}, ~\tau^2_{\alpha} \overset{iid}{\sim} N(~\mu_{\alpha}, ~\tau^2_{\alpha}); ~
+  \theta_{Type} ~| ~\mu_{\theta}, ~\tau^2_{\theta} \overset{iid}{\sim} N(~\mu_{\theta}, ~\tau^2_{\theta})\\
+\end{aligned}
+$$
+The data was expected to drive the posterior distribution of the coeffcients.
+Therefore, non-informative normal priors (µ~0~ = 0, sigma^2^ = 10^6^) for mean 
+and non-informative gamma priors (alpha = 1/2, beta = 10/2) for precision were used.
+The three models were fitted using JAGS and R. 
+6x10^5^ iterations were conducted. The first 10^5^ iterations were for burn-in process.
+The last 5x10^5^ iterations were stored with thinning interval of 100.
+The models converge as validated by trace plots, Gelman and autocorrelation diagnostics.
+Modeling assumptions were also verified using residual analyses (figure 2).
+The residual variances are higher around 20 to 30 µmol CO~2~ up take per m^2^ per sec.
+The reason is that the linear models are not good at capturing the transition from a linear increasing phase in the beginning
+to a flat (saturated) phase around these uptake concentration. 
+In the orgigin paper of Potvin et. al. 1990, a non linear model was employed which was better at
+modelling this kind of transition. However, non linear models are outside the scope of this course so that
+the linear Bayesian hierarchical models continue to be used.
+
+```{r model1, include=FALSE, cache=TRUE}
+# Fit the model
+# Input data
+CO2$log_conc = log(CO2$conc)
+CO2$is_chilled = as.numeric(CO2$Treatment) - 1
+data_jags = as.list(CO2)
+
+# Monitoring parameter
+params = c("a0", "a", "b", "sig", "tau")
+
+# Model specification
+mod_string1 = " model {
+  for (i in 1:length(uptake)) {
+    uptake[i] ~ dnorm(mu[i], prec)
+    mu[i] = a[Type[i]] + b[1]*log_conc[i] + b[2]*is_chilled[i]
+  }
+
+  for (j in 1:max(Type)) {
+    a[j] ~ dnorm(a0, prec_a)
+  }
+
+  a0 ~ dnorm(0.0, 1.0/1.0e6)
+  prec_a ~ dgamma(1/2.0, 1*10.0/2.0)
+  tau = sqrt( 1.0 / prec_a )
+
+  for (j in 1:2) {
+    b[j] ~ dnorm(0.0, 1.0/1.0e6)
+  }
+
+  prec ~ dgamma(1/2.0, 1*10.0/2.0)
+  sig = sqrt( 1.0 / prec )
+} "
+# Modelling
+set.seed(116)
+mod1 = jags.model(textConnection(mod_string1), data=data_jags, n.chains=3)
+update(mod1, 1e5) # burn-in
+
+mod_sim1 = coda.samples(model=mod1, variable.names=params, n.iter=5e5, thin=100)
+mod_csim1 = as.mcmc(do.call(rbind, mod_sim1)) # combine multiple chains
+# DIC
+dic1 = dic.samples(mod1, n.iter=1e5)
+```
+
+```{r model2, include=FALSE, cache=TRUE}
+# Model specification
+mod_string2 = " model {
+  for (i in 1:length(uptake)) {
+    uptake[i] ~ dnorm(mu[i], prec)
+    mu[i] = a[Type[i]] + b[1]*log_conc[i] + b[2]*is_chilled[i] + b[3]*is_chilled[i]*log_conc[i]
+  }
+
+  for (j in 1:max(Type)) {
+    a[j] ~ dnorm(a0, prec_a)
+  }
+
+  a0 ~ dnorm(0.0, 1.0/1.0e6)
+  prec_a ~ dgamma(1/2.0, 1*10.0/2.0)
+  tau = sqrt( 1.0 / prec_a )
+
+  for (j in 1:3) {
+    b[j] ~ dnorm(0.0, 1.0/1.0e6)
+  }
+
+  prec ~ dgamma(1/2.0, 1*10.0/2.0)
+  sig = sqrt( 1.0 / prec )
+} "
+# Modelling
+set.seed(116)
+mod2 = jags.model(textConnection(mod_string2), data=data_jags, n.chains=3)
+update(mod2, 1e5) # burn-in
+
+mod_sim2 = coda.samples(model=mod2, variable.names=params, n.iter=5e5, thin=100)
+mod_csim2 = as.mcmc(do.call(rbind, mod_sim2)) # combine multiple chains
+# DIC
+dic2 = dic.samples(mod2, n.iter=1e5)
+```
+
+```{r model3, include=FALSE, cache=TRUE}
+# Model specification
+mod_string3 = " model {
+  for (i in 1:length(uptake)) {
+    uptake[i] ~ dnorm(mu[i], prec)
+    mu[i] = a[Type[i]] + th[Type[i]]*log_conc[i] + b[1]*is_chilled[i] + b[2]*is_chilled[i]*log_conc[i]
+  }
+
+  for (j in 1:max(Type)) {
+    a[j] ~ dnorm(a0, prec_a)
+  }
+  
+  for (j in 1:max(Type)) {
+    th[j] ~ dnorm(th0, prec_th)
+  }
+
+  a0 ~ dnorm(0.0, 1.0/1.0e6)
+  prec_a ~ dgamma(1/2.0, 1*10.0/2.0)
+  tau_a = sqrt( 1.0 / prec_a )
+
+  th0 ~ dnorm(0.0, 1.0/1.0e6)
+  prec_th ~ dgamma(1/2.0, 1*10.0/2.0)
+  tau_th = sqrt( 1.0 / prec_th )
+
+  for (j in 1:2) {
+    b[j] ~ dnorm(0.0, 1.0/1.0e6)
+  }
+
+  prec ~ dgamma(1/2.0, 1*10.0/2.0)
+  sig = sqrt( 1.0 / prec )
+} "
+
+params3 = c("a0", "a", "th0", "th", "b", "sig", "tau_a", "tau_th")
+
+# Modelling
+set.seed(116)
+mod3 = jags.model(textConnection(mod_string3), data=data_jags, n.chains=3)
+update(mod3, 1e5) # burn-in
+
+mod_sim3 = coda.samples(model=mod3, variable.names=params3, n.iter=5e5, thin=100)
+mod_csim3 = as.mcmc(do.call(rbind, mod_sim3)) # combine multiple chains
+# DIC
+dic3 = dic.samples(mod3, n.iter=1e5)
+```
+
+```{r residual_calculate, include=FALSE}
+attach(CO2)
+# Model 1
+pm_params1 = colMeans(mod_csim1) # posterior mean
+uptakehat1 = pm_params1["a[1]"] + pm_params1["b[1]"]*log_conc[1:42] + 
+  pm_params1["b[2]"]*is_chilled[1:42]
+uptakehat1[43:84] = pm_params1["a[2]"] + pm_params1["b[1]"]*log_conc[43:84] + 
+  pm_params1["b[2]"]*is_chilled[43:84]
+resid1 = CO2$uptake - uptakehat1
+# Model 2
+pm_params2 = colMeans(mod_csim2) # posterior mean
+uptakehat2 = pm_params2["a[1]"] + pm_params2["b[1]"]*log_conc[1:42] + 
+  pm_params2["b[2]"]*is_chilled[1:42] + pm_params2["b[3]"]*is_chilled[1:42]*log_conc[1:42]
+uptakehat2[43:84] = pm_params2["a[2]"] + pm_params2["b[1]"]*log_conc[43:84] + 
+  pm_params2["b[2]"]*is_chilled[43:84] + pm_params2["b[3]"]*is_chilled[1:42]*log_conc[1:42]
+resid2 = CO2$uptake - uptakehat2
+
+# Model 3
+pm_params3 = colMeans(mod_csim3) # posterior mean
+uptakehat3 = pm_params3["a[1]"] + pm_params3["th[1]"]*log_conc[1:42] + 
+  pm_params3["b[1]"]*is_chilled[1:42] + pm_params3["b[2]"]*is_chilled[1:42]*log_conc[1:42]
+uptakehat3[43:84] = pm_params3["a[2]"] + pm_params3["th[2]"]*log_conc[43:84] + 
+  pm_params3["b[1]"]*is_chilled[43:84] + pm_params3["b[2]"]*is_chilled[43:84]*log_conc[43:84]
+resid3 = CO2$uptake - uptakehat3
+```
+
+```{r residual_plot, fig.height=2.5, fig.width=6, fig.align="center"}
+par(mfrow=c(1,3))
+plot(uptakehat1,resid1)
+plot(uptakehat2,resid2)
+plot(uptakehat3,resid3)
+```
+
+**Figure 2:** Residual analyses (predicted mean ~ residual) of the three models.  
+```{r dic, echo=TRUE}
+dic1
+dic2
+dic3
+```
+After comparing Deviance Information Criterion, model 3 was selected.
+Although this model has the highest number of parameters and thus the highest penalty, 
+the penalized deviance is still the lowest amonong the three models. This indicate the effective of the parameters in the model.
+
+#### 4. Results  
+
+```{r posterior}
+summary(mod_csim3)$statistics
+```
+```{r r2}
+sstot = sum((uptake - mean(uptake))^2)
+ssres = sum((uptake - uptakehat3)^2)
+r2 = 1 - ssres/sstot
+```
+
+Figure 3 shows the prediction of the model (lines) for different combination of type and treatment.
+The model can explain above 80% of the variances in the dataset (r^2^ = 0.83). In general, the uptake concentration 
+increases quickly in the begining and slowdown toward higher ambient concentration. The posterior means of theta
+were significantly positive (around 11 and 8 with std.dev of around 1). However, the grasses from Quebec uptake 15 to 20 µmol CO~2~/m^2^.sec more 
+than Mississippi in the same ambient CO~2~ concentration and treatment. 
+The slope of Quebec (theta~1~) was higher than Mississippi (theta~2~) 99% of the time.
+Considering grasses from the same type, chilled grasses uptake 5 to 10 µmol CO~2~/m^2^.sec less than non-chilled grasses in the same
+ambient CO~2~ concentration. The slope (beta~2~) was smaller than zero more than 95% of the time.
+Although the intercepts show the contradictions (a~1~ < a~2~ and b~1~ > 0), the value of the slopes were large enough
+so that within the observation range (95 to 1000 ml CO~2~/L) these trends and conclusions were still valid (figure 3). 
+Moreover, the intercepts do not have a real interpretation because they correspond to the mean response
+for a grass that is not chilled and in a condition of 1 ml CO~2~ per litre air, 
+which is not the case for these grasses.
+Thus, we should not insist on the intercepts and extrapolate outside of the observation range.  
+
+
+
+```{r posterior_probabiltiy, echo = TRUE}
+mean(mod_csim3[,"th[1]"] > mod_csim3[,"th[2]"])
+mean(mod_csim3[,"b[2]"] < 0)
+```
+```{r posterior_prediction, fig.height=2.5, fig.width=5}
+pred.dat = data.frame(uptake.pred = uptakehat3, conc = conc, Type = Type, Treatment = Treatment)
+ggplot(pred.dat, aes(conc, uptake.pred, col=interaction(Type,Treatment))) + geom_line() + theme_minimal() +
+  geom_point(aes(conc, uptake, shape=Treatment)) +
+  scale_shape_manual(values=c(4, 2)) +
+  theme(axis.text.x = element_text(size=6), axis.text.y = element_text(size=6), axis.title = element_text(size=8),
+        legend.text = element_text(size=6), legend.title = element_text(size=7)) +
+  labs(y = bquote("CO"[2]*" Uptake (µmol / m"^2*".sec]"), x=bquote("Ambient Concentration (ml CO"[2]*" / L)"), col="Type") +
+    
+  annotate("text", x = 250, y = 48, label = "r^2 == 0.83", parse=TRUE, size=3)
+```
+
+**Figure 3:** Model prediction. Lines: mean predicted CO~2~ uptake ~ ambient concentration + Treatmen + Type (color).
+Points: observed CO~2~ uptake ~ ambient concentration + Treatmen (shape) + Type (color).
+
+#### 5. Conclusions  
+In conclusion, three Bayesian hierarchical models with increasing complexity and terms were employed for studying 
+the effect of cold condition on grass photosynthesis.
+The best performance model was the most complex with random intercepts and slopes for each type of grasses.
+This model can explain 83% of variance in the dataset. Based upon the selected model, it can be concluded that
+cold weather has negative effects on the photosynthesis of the grass.  
+
+#### References  
+1) Potvin, C., Lechowicz, M. J. and Tardif, S. (1990) “The statistical analysis of ecophysiological response curves obtained from experiments involving repeated measures”, Ecology, 71, 1389–1400.  
+2) Pinheiro, J. C. and Bates, D. M. (2000) Mixed-effects Models in S and S-PLUS, Springer.
